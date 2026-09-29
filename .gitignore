@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDE
+.idea/
+.vscode/
+
+# Dataset and generated data
+dataset/raw/*
+dataset/processed/*
+!dataset/raw/.gitkeep
+!dataset/processed/.gitkeep
+
+# Generated model
+model/*.joblib
+model/*.json
+model/*.pkl
+
+# Logs/results
+results/*
+*.log
+
+# OS
+.DS_Store
+Thumbs.db

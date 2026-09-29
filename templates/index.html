@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ISLENS — Live ISL Translation</title>
+    <meta name="description" content="Real-time Indian Sign Language recognition powered by MediaPipe and MLP.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700;800;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="bg-grid"></div>
+
+    <!-- ── Navbar ─────────────────────────────────────────────── -->
+    <header class="navbar">
+        <div class="brand">
+            <div class="brand-mark">I</div>
+            <div>
+                <strong>ISLENS</strong>
+                <span>Live Translation · Phase 01</span>
+            </div>
+        </div>
+        <div id="modelStatus" class="status-pill">
+            <span class="status-dot"></span>Checking model…
+        </div>
+    </header>
+
+    <main class="page">
+
+        <!-- ── Hero ───────────────────────────────────────────── -->
+        <section class="hero">
+            <div class="eyebrow">INDIAN SIGN LANGUAGE · REAL-TIME</div>
+            <h1>Sign. See.<br><span>Speak.</span></h1>
+            <p>Point your camera at a hand sign — ISLENS instantly reads it,
+               letter by letter, building words in real time.</p>
+        </section>
+
+        <!-- ── Workspace ──────────────────────────────────────── -->
+        <section class="workspace">
+
+            <!-- Camera panel -->
+            <div class="cam-panel card">
+                <div class="cam-header">
+                    <div>
+                        <span class="label-sm">LIVE FEED</span>
+                        <h2>Camera</h2>
+                    </div>
+                    <div id="liveIndicator" class="live-badge">
+                        <span class="live-dot"></span>LIVE
+                    </div>
+                </div>
+
+                <div class="video-wrap">
+                    <video id="video" autoplay playsinline muted></video>
+                    <canvas id="hiddenCanvas" hidden></canvas>
+                    <!-- Overlaid metrics -->
+                    <div class="overlay-fps" id="fpsDisplay">0 FPS</div>
+                    <div class="hand-guide" id="handGuide">
+                        <div class="guide-box"></div>
+                        <span>Position hand here</span>
+                    </div>
+                </div>
+
+                <div class="cam-controls">
+                    <button id="startBtn" class="btn-primary">
+                        <svg width="16" height="16" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                        Start Live
+                    </button>
+                    <button id="stopBtn" class="btn-secondary" disabled>
+                        <svg width="16" height="16" fill="currentColor" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12"/></svg>
+                        Stop
+                    </button>
+                </div>
+
+                <!-- Pipeline strip -->
+                <div class="pipeline">
+                    <div class="pipe-step">WEBCAM</div><div class="pipe-arrow">→</div>
+                    <div class="pipe-step">OPENCV</div><div class="pipe-arrow">→</div>
+                    <div class="pipe-step">MEDIAPIPE</div><div class="pipe-arrow">→</div>
+                    <div class="pipe-step active">MLP</div><div class="pipe-arrow">→</div>
+                    <div class="pipe-step">TEXT</div>
+                </div>
+            </div>
+
+            <!-- Output panel -->
+            <div class="out-panel card">
+
+                <!-- Current sign -->
+                <div class="sign-box">
+                    <div class="label-sm">CURRENT SIGN</div>
+                    <div id="prediction" class="big-letter">—</div>
+
+                    <!-- Confidence bar -->
+                    <div class="conf-row">
+                        <span class="label-sm">CONFIDENCE</span>
+                        <span id="confidenceVal" class="conf-val">—</span>
+                    </div>
+                    <div class="conf-track">
+                        <div id="confidenceBar" class="conf-fill"></div>
+                    </div>
+
+                    <div id="message" class="msg-text">
+                        Press Start Live to begin.
+                    </div>
+                </div>
+
+                <!-- Translated text -->
+                <div class="text-card">
+                    <div class="text-head">
+                        <span class="label-sm">TRANSLATED TEXT</span>
+                        <button id="btnClear" class="link-btn">CLEAR</button>
+                    </div>
+                    <div id="translatedText" class="translated">Start signing…</div>
+                    <div class="text-actions">
+                        <button id="btnBackspace" class="ctrl-btn">⌫ Delete</button>
+                        <button id="btnSpace"     class="ctrl-btn">␣ Space</button>
+                    </div>
+                </div>
+
+            </div>
+        </section>
+
+        <!-- ── Classes grid ───────────────────────────────────── -->
+        <section class="classes-section card">
+            <div class="classes-head">
+                <div>
+                    <span class="label-sm">ALPHABET</span>
+                    <h2>Supported signs</h2>
+                </div>
+                <span id="classCount" class="muted-sm">0 classes</span>
+            </div>
+            <div id="classGrid" class="class-grid"></div>
+        </section>
+
+        <footer>
+            <span>ISLENS</span>
+            <span>Phase 01 · A–Z</span>
+            <span>Python · OpenCV · MediaPipe · MLP</span>
+        </footer>
+    </main>
+
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>
