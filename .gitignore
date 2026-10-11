@@ -30,3 +30,14 @@ results/*
 # OS
 .DS_Store
 Thumbs.db
+
+# Secrets & Local Environment
+.env
+*.env
+dataset/.env
+
+# Local downloads and temporary scratch files
+dataset/youtube/
+dataset/youtube_videos/
+scratch/
+

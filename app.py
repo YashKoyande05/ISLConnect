@@ -37,6 +37,7 @@ def status():
     return jsonify({
         "model_ready": predictor.ready,
         "classes": predictor.labels,
+        "gemini_enabled": translation_service.has_api_key,
         "message": (
             "Model loaded."
             if predictor.ready
@@ -114,26 +115,55 @@ def recognize_sequence():
 @app.route("/api/translate", methods=["POST"])
 def translate():
     """
-    Translates the current sequence of ISL glosses to an English sentence.
+    Translates the current sequence of ISL glosses or text to an English sentence.
     """
     data = request.json or {}
     sequence = data.get("sequence", [])
+    text_input = data.get("text", "")
     
-    if not sequence:
+    if not sequence and not text_input:
         sequence = sequence_buffer.get_sequence()
         
-    english_text = translation_service.translate(sequence)
+    result = translation_service.translate(sequence=sequence, text_input=text_input)
     
     return jsonify({
         "success": True,
-        "sequence": sequence,
-        "translation": english_text
+        "sequence": result.get("sequence", sequence),
+        "translation": result.get("translation", ""),
+        "source": result.get("source", "none")
     })
 
 @app.route("/api/clear-sequence", methods=["POST"])
 def clear_sequence():
     sequence_buffer.clear()
     return jsonify({"success": True, "status": "cleared"})
+
+
+@app.route("/api/harvest-youtube", methods=["POST"])
+def harvest_youtube_endpoint():
+    """
+    Downloads and harvests an ISL video from YouTube, extracts landmark dataset,
+    retrains classifier, and reloads the model live.
+    """
+    data = request.json or {}
+    video_id = data.get("video_id", "").strip()
+    if not video_id:
+        return jsonify({"success": False, "error": "No video_id provided"}), 400
+        
+    try:
+        from training.youtube_harvester import harvest_video, merge_and_retrain
+        count = harvest_video(video_id)
+        if count > 0:
+            merge_and_retrain()
+            predictor.reload()
+            return jsonify({
+                "success": True,
+                "samples_added": count,
+                "classes": predictor.labels
+            })
+        return jsonify({"success": False, "error": "No sign intervals could be extracted."}), 400
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
 
 
 if __name__ == "__main__":

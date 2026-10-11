@@ -1,58 +1,92 @@
-/* ─── ISLENS · Live Translation Frontend ─────────────────────── */
+/* ─── ISLENS · Live Translation Frontend with AI Sentence Modeling ─── */
 
 const $ = (id) => document.getElementById(id);
 
 /* DOM refs */
-const video          = $("video");
-const canvas         = $("hiddenCanvas");
-const startBtn       = $("startBtn");
-const stopBtn        = $("stopBtn");
-const liveIndicator  = $("liveIndicator");
-const prediction     = $("prediction");
-const confidenceVal  = $("confidenceVal");
-const confidenceBar  = $("confidenceBar");
-const fpsDisplay     = $("fpsDisplay");
-const message        = $("message");
-const translatedText = $("translatedText");
-const modelStatus    = $("modelStatus");
-const classGrid      = $("classGrid");
-const classCount     = $("classCount");
+const video                  = $("video");
+const canvas                 = $("hiddenCanvas");
+const startBtn               = $("startBtn");
+const stopBtn                = $("stopBtn");
+const liveIndicator          = $("liveIndicator");
+const prediction             = $("prediction");
+const confidenceVal          = $("confidenceVal");
+const confidenceBar          = $("confidenceBar");
+const fpsDisplay             = $("fpsDisplay");
+const message                = $("message");
+const glossContainer         = $("glossContainer");
+const translatedText         = $("translatedText");
+const translationSourceBadge = $("translationSourceBadge");
+const modelStatus            = $("modelStatus");
+const aiStatus               = $("aiStatus");
+const aiStatusText           = $("aiStatusText");
+const classGrid              = $("classGrid");
+const classCount             = $("classCount");
+
+const btnTranslate           = $("btnTranslate");
+const btnSpeak               = $("btnSpeak");
+const btnCopy                = $("btnCopy");
+const btnClear               = $("btnClear");
+const btnBackspace           = $("btnBackspace");
+const btnSpace               = $("btnSpace");
 
 /* ── State ─────────────────────────────────────────────────────── */
-let stream       = null;
-let liveInterval = null;
-let isLive       = false;
+let stream           = null;
+let liveInterval     = null;
+let isLive           = false;
 
-let text             = "";
-let recentPrediction = [];   // rolling buffer for stability
+let detectedGlosses  = [];     // List of recognized glosses/words
+let currentSentence  = "";     // Translated English sentence
+let recentPrediction = [];     // Rolling window for frame stability
 let lastAccepted     = null;
+let lastSignTime     = 0;
+let isTranslating    = false;
+let translationTimer = null;
 
 let frameCount = 0;
 let fpsTimer   = Date.now();
 
-const INTERVAL_MS   = 120;  // ~8 FPS prediction rate
-const STABLE_NEEDED = 3;    // how many matching frames to accept a letter
-const BUFFER_SIZE   = 5;    // rolling window size
-const MIN_CONFIDENCE = 0.70;
+const INTERVAL_MS    = 130;    // ~7.5 FPS prediction rate
+const STABLE_NEEDED  = 2;      // Frame consensus needed to accept sign
+const BUFFER_SIZE    = 4;      // Rolling window size
+const MIN_CONFIDENCE = 0.58;
+const SIGN_COOLDOWN  = 800;    // ms between registering the same consecutive sign
 
 /* ── API status ─────────────────────────────────────────────────── */
 async function loadStatus() {
     try {
         const data = await fetch("/api/status").then(r => r.json());
+        
+        // Model status
         if (data.model_ready) {
             modelStatus.classList.add("ready");
-            modelStatus.innerHTML = '<span class="status-dot"></span>Model ready';
+            modelStatus.innerHTML = '<span class="status-dot"></span>Model loaded';
         } else {
+            modelStatus.classList.remove("ready");
             modelStatus.innerHTML = '<span class="status-dot"></span>Model not trained';
         }
+
+        // AI Translation status
+        if (data.gemini_enabled) {
+            aiStatus.classList.add("gemini-active");
+            aiStatusText.textContent = "AI: Gemini Active";
+            translationSourceBadge.textContent = "Gemini AI";
+            translationSourceBadge.classList.add("gemini");
+        } else {
+            aiStatus.classList.remove("gemini-active");
+            aiStatusText.textContent = "AI: Smart NLP Engine";
+            translationSourceBadge.textContent = "Smart NLP Engine";
+            translationSourceBadge.classList.remove("gemini");
+        }
+
+        // Active Classes Grid
         classGrid.innerHTML = "";
-        data.classes.forEach(label => {
+        (data.classes || []).forEach(label => {
             const el = document.createElement("div");
             el.className = "class-item";
             el.textContent = label.toUpperCase();
             classGrid.appendChild(el);
         });
-        classCount.textContent = `${data.classes.length} classes`;
+        classCount.textContent = `${(data.classes || []).length} signs`;
     } catch {
         modelStatus.innerHTML = '<span class="status-dot"></span>Backend offline';
     }
@@ -95,7 +129,7 @@ function startLive() {
     fpsTimer          = Date.now();
 
     liveInterval = setInterval(sendFrame, INTERVAL_MS);
-    setMessage("Live translation active — show a hand sign.");
+    setMessage("Live translation active — position hand in camera.");
 }
 
 function stopLive() {
@@ -145,31 +179,112 @@ async function sendFrame() {
 
         if (!frameResult.hand_detected) {
             resetPrediction();
-            setMessage("No hand detected — hold a sign up to the camera.");
+            setMessage("No hand detected — hold hand up to the camera.");
             return;
         }
 
         updatePrediction(frameResult.prediction, frameResult.confidence);
 
-        // Client-side stabilization for individual frames
-        if (frameResult.confidence >= MIN_CONFIDENCE) {
+        // Stabilize individual signs and add to gloss sequence
+        if (frameResult.confidence >= MIN_CONFIDENCE && frameResult.prediction) {
             stabilize(frameResult.prediction);
         } else {
             recentPrediction = [];
         }
 
-        // Server-side continuous word buffering
-        if (data.new_gloss) {
-            console.log("New word recognized by sequence buffer:", data.new_gloss);
-            fetchTranslation(data.full_sequence);
-        }
-
     } catch { /* network blip — ignore */ }
 }
 
-async function fetchTranslation(sequence) {
-    if (!sequence || sequence.length === 0) return;
+/* ── Stability buffer & Sequence builder ─────────────────────────── */
+function stabilize(label) {
+    recentPrediction.push(label);
+    if (recentPrediction.length > BUFFER_SIZE) recentPrediction.shift();
+
+    const counts = {};
+    recentPrediction.forEach(x => counts[x] = (counts[x] || 0) + 1);
+    const [top, cnt] = Object.entries(counts).sort((a,b) => b[1]-a[1])[0];
+
+    const now = Date.now();
+    const isNewSign = top !== lastAccepted;
+    const cooldownElapsed = (now - lastSignTime) > SIGN_COOLDOWN;
+
+    if (cnt >= STABLE_NEEDED && (isNewSign || cooldownElapsed)) {
+        lastAccepted = top;
+        lastSignTime = now;
+        
+        // Add recognized sign gloss to sequence
+        addGloss(top);
+
+        /* brief visual feedback flash */
+        prediction.classList.add("flash");
+        setTimeout(() => prediction.classList.remove("flash"), 300);
+    }
+}
+
+function addGloss(gloss) {
+    const isLetter = gloss.length === 1 && /[A-Z]/i.test(gloss);
     
+    // Check if the previous token was a single letter - if user is fingerspelling, group consecutive letters
+    if (isLetter && detectedGlosses.length > 0) {
+        const last = detectedGlosses[detectedGlosses.length - 1];
+        // If last element is also single letter, keep both as separate chips or together
+    }
+    
+    detectedGlosses.push(gloss);
+    renderGlosses();
+
+    // Trigger debounced AI translation automatically
+    scheduleTranslation();
+}
+
+function renderGlosses() {
+    glossContainer.innerHTML = "";
+    if (detectedGlosses.length === 0) {
+        glossContainer.innerHTML = '<span class="placeholder-text">Signed words and letters will collect here…</span>';
+        return;
+    }
+
+    detectedGlosses.forEach((gloss, idx) => {
+        const chip = document.createElement("span");
+        chip.className = "gloss-chip";
+        const isLetter = gloss.length === 1 && /[A-Z]/i.test(gloss);
+        if (isLetter) {
+            chip.classList.add("letter-chip");
+        }
+        chip.textContent = gloss.toUpperCase();
+        chip.title = isLetter ? `Letter '${gloss}' (Click to remove)` : `Sign '${gloss}' (Click to remove)`;
+        chip.addEventListener("click", () => {
+            detectedGlosses.splice(idx, 1);
+            renderGlosses();
+            scheduleTranslation();
+        });
+        glossContainer.appendChild(chip);
+    });
+}
+
+function scheduleTranslation() {
+    clearTimeout(translationTimer);
+    translationTimer = setTimeout(() => {
+        fetchTranslation(detectedGlosses);
+    }, 400); // 400ms debounce
+}
+
+/* ── AI Translation API ──────────────────────────────────────────── */
+async function fetchTranslation(sequence, manual = false) {
+    if (!sequence || sequence.length === 0) {
+        translatedText.textContent = "Start signing to generate full sentences…";
+        currentSentence = "";
+        return;
+    }
+
+    if (isTranslating && !manual) return;
+    isTranslating = true;
+
+    if (manual) {
+        btnTranslate.disabled = true;
+        btnTranslate.textContent = "Translating…";
+    }
+
     try {
         const resp = await fetch("/api/translate", {
             method: "POST",
@@ -177,23 +292,51 @@ async function fetchTranslation(sequence) {
             body: JSON.stringify({ sequence: sequence })
         });
         const data = await resp.json();
-        
+
         if (data.success && data.translation) {
-            $("translatedText").textContent = data.translation;
+            currentSentence = data.translation;
+            translatedText.textContent = currentSentence;
+            
+            // Update source badge
+            if (data.source === "gemini") {
+                translationSourceBadge.textContent = "Gemini AI";
+                translationSourceBadge.classList.add("gemini");
+            } else {
+                translationSourceBadge.textContent = "Smart NLP Engine";
+                translationSourceBadge.classList.remove("gemini");
+            }
         }
-    } catch { /* ignore */ }
+    } catch (err) {
+        console.error("Translation error:", err);
+    } finally {
+        isTranslating = false;
+        if (manual) {
+            btnTranslate.disabled = false;
+            btnTranslate.textContent = "✨ Translate Now";
+        }
+    }
 }
 
-/* ── UI helpers ──────────────────────────────────────────────────── */
+/* ── UI Helpers ──────────────────────────────────────────────────── */
 function updatePrediction(label, conf) {
-    prediction.textContent = label ? label.toUpperCase() : "—";
+    const text = label ? label.toUpperCase() : "—";
+    prediction.textContent = text;
+    
+    // Scale font size dynamically according to word length so box never resizes
+    prediction.classList.remove("long-word", "medium-word");
+    if (text.length > 7) {
+        prediction.classList.add("long-word");
+    } else if (text.length > 3) {
+        prediction.classList.add("medium-word");
+    }
+
     const pct = Math.round(conf * 100);
     confidenceVal.textContent = `${pct}%`;
     confidenceBar.style.width = `${pct}%`;
     confidenceBar.style.background =
-        pct >= 90 ? "var(--accent)" :
-        pct >= 70 ? "#f5d020"       : "#ff6b6b";
-    setMessage("Detecting…");
+        pct >= 85 ? "var(--accent)" :
+        pct >= 65 ? "#f5d020"       : "#ff6b6b";
+    setMessage("Detecting sign…");
 
     /* highlight matching class badge */
     document.querySelectorAll(".class-item").forEach(el => {
@@ -203,6 +346,7 @@ function updatePrediction(label, conf) {
 
 function resetPrediction() {
     prediction.textContent    = "—";
+    prediction.classList.remove("long-word", "medium-word");
     confidenceVal.textContent = "—";
     confidenceBar.style.width = "0";
     recentPrediction          = [];
@@ -214,55 +358,61 @@ function setMessage(msg) {
     message.textContent = msg;
 }
 
-/* ── Stability buffer ────────────────────────────────────────────── */
-function stabilize(label) {
-    recentPrediction.push(label);
-    if (recentPrediction.length > BUFFER_SIZE) recentPrediction.shift();
+/* ── Controls Wiring ─────────────────────────────────────────────── */
+btnTranslate.addEventListener("click", () => {
+    fetchTranslation(detectedGlosses, true);
+});
 
-    const counts = {};
-    recentPrediction.forEach(x => counts[x] = (counts[x] || 0) + 1);
-    const [top, cnt] = Object.entries(counts).sort((a,b) => b[1]-a[1])[0];
-
-    if (cnt >= STABLE_NEEDED && top !== lastAccepted) {
-        lastAccepted = top;
-        text += top;
-        renderText();
-        /* brief visual flash */
-        prediction.classList.add("flash");
-        setTimeout(() => prediction.classList.remove("flash"), 300);
-    }
-}
-
-/* ── Text controls ───────────────────────────────────────────────── */
-$("btnSpace").addEventListener("click", () => {
-    if (text && !text.endsWith(" ")) {
-        text       += " ";
-        lastAccepted = null;
-        recentPrediction = [];
-        renderText();
+btnSpeak.addEventListener("click", () => {
+    if (!currentSentence) return;
+    if ("speechSynthesis" in window) {
+        window.speechSynthesis.cancel(); // Stop any pending speech
+        const utterance = new SpeechSynthesisUtterance(currentSentence);
+        utterance.rate = 0.95;
+        utterance.pitch = 1.0;
+        window.speechSynthesis.speak(utterance);
+    } else {
+        alert("Speech synthesis is not supported in this browser.");
     }
 });
 
-$("btnBackspace").addEventListener("click", () => {
-    text = text.slice(0, -1);
-    lastAccepted     = null;
-    recentPrediction = [];
-    renderText();
+btnCopy.addEventListener("click", async () => {
+    if (!currentSentence) return;
+    try {
+        await navigator.clipboard.writeText(currentSentence);
+        const originalText = btnCopy.textContent;
+        btnCopy.textContent = "✓ Copied!";
+        setTimeout(() => btnCopy.textContent = originalText, 1500);
+    } catch (err) {
+        console.error("Could not copy:", err);
+    }
 });
 
-$("btnClear").addEventListener("click", () => {
-    text             = "";
-    lastAccepted     = null;
+btnClear.addEventListener("click", () => {
+    detectedGlosses = [];
+    currentSentence = "";
+    lastAccepted = null;
     recentPrediction = [];
-    renderText();
+    renderGlosses();
+    translatedText.textContent = "Start signing to generate full sentences…";
     fetch("/api/clear-sequence", { method: "POST" });
 });
 
-function renderText() {
-    translatedText.textContent = text || "Start signing…";
-}
+btnBackspace.addEventListener("click", () => {
+    if (detectedGlosses.length > 0) {
+        detectedGlosses.pop();
+        lastAccepted = null;
+        recentPrediction = [];
+        renderGlosses();
+        scheduleTranslation();
+    }
+});
 
-/* ── Button wiring ───────────────────────────────────────────────── */
+btnSpace.addEventListener("click", () => {
+    // Inserts a pause / forces immediate translation
+    fetchTranslation(detectedGlosses, true);
+});
+
 startBtn.addEventListener("click", startCamera);
 stopBtn.addEventListener("click",  stopCamera);
 

@@ -40,7 +40,7 @@ class HandDetector:
         (5, 9), (9, 13), (13, 17),                  # palm
     ]
 
-    def __init__(self, max_num_hands=1, min_detection_confidence=0.55,
+    def __init__(self, max_num_hands=2, min_detection_confidence=0.55,
                  model_path=None):
         model_path = Path(model_path) if model_path else _DEFAULT_MODEL
         if not model_path.exists():

@@ -5,7 +5,7 @@ class SequenceBuffer:
     Manages a temporal buffer of recent predictions to stabilize continuous signing 
     and extract meaningful words or glosses from a stream of frames.
     """
-    def __init__(self, buffer_size=15, threshold=0.7):
+    def __init__(self, buffer_size=10, threshold=0.55):
         self.buffer_size = buffer_size
         self.threshold = threshold
         self.predictions = collections.deque(maxlen=buffer_size)

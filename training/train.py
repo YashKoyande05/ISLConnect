@@ -34,7 +34,11 @@ def main():
 
     df = pd.read_csv(CSV_PATH)
 
-    X = df[[f"f{i}" for i in range(63)]].values.astype(np.float32)
+    feat_cols = [c for c in df.columns if c.startswith("f") and c[1:].isdigit()]
+    feat_cols.sort(key=lambda c: int(c[1:]))
+    print(f"Found {len(feat_cols)} landmark features per sample.")
+
+    X = df[feat_cols].values.astype(np.float32)
     y_text = df["label"].astype(str).values
 
     encoder = LabelEncoder()
@@ -59,13 +63,13 @@ def main():
         hidden_layer_sizes=(128, 64),
         activation="relu",
         solver="adam",
-        alpha=1e-4,
+        alpha=1e-3,  # Stronger L2 regularization to prevent overfitting
         batch_size=64,
         learning_rate_init=1e-3,
         max_iter=1000,
         early_stopping=True,
-        validation_fraction=0.10,
-        n_iter_no_change=20,
+        validation_fraction=0.15,
+        n_iter_no_change=15,
         random_state=42,
         verbose=True,
     )
