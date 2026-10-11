@@ -133,7 +133,7 @@ async function sendFrame() {
     form.append("image", blob, "frame.jpg");
 
     try {
-        const resp = await fetch("/api/predict", { method: "POST", body: form });
+        const resp = await fetch("/api/recognize-sequence", { method: "POST", body: form });
         const data = await resp.json();
 
         if (!resp.ok || !data.success) {
@@ -141,21 +141,47 @@ async function sendFrame() {
             return;
         }
 
-        if (!data.hand_detected) {
+        const frameResult = data.frame_prediction;
+
+        if (!frameResult.hand_detected) {
             resetPrediction();
             setMessage("No hand detected — hold a sign up to the camera.");
             return;
         }
 
-        updatePrediction(data.prediction, data.confidence);
+        updatePrediction(frameResult.prediction, frameResult.confidence);
 
-        if (data.confidence >= MIN_CONFIDENCE) {
-            stabilize(data.prediction);
+        // Client-side stabilization for individual frames
+        if (frameResult.confidence >= MIN_CONFIDENCE) {
+            stabilize(frameResult.prediction);
         } else {
             recentPrediction = [];
         }
 
+        // Server-side continuous word buffering
+        if (data.new_gloss) {
+            console.log("New word recognized by sequence buffer:", data.new_gloss);
+            fetchTranslation(data.full_sequence);
+        }
+
     } catch { /* network blip — ignore */ }
+}
+
+async function fetchTranslation(sequence) {
+    if (!sequence || sequence.length === 0) return;
+    
+    try {
+        const resp = await fetch("/api/translate", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ sequence: sequence })
+        });
+        const data = await resp.json();
+        
+        if (data.success && data.translation) {
+            $("translatedText").textContent = data.translation;
+        }
+    } catch { /* ignore */ }
 }
 
 /* ── UI helpers ──────────────────────────────────────────────────── */
@@ -229,6 +255,7 @@ $("btnClear").addEventListener("click", () => {
     lastAccepted     = null;
     recentPrediction = [];
     renderText();
+    fetch("/api/clear-sequence", { method: "POST" });
 });
 
 function renderText() {

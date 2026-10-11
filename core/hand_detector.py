@@ -56,9 +56,9 @@ class HandDetector:
             base_options=base_options,
             running_mode=mp_vision.RunningMode.IMAGE,
             num_hands=max_num_hands,
-            min_hand_detection_confidence=min_detection_confidence,
-            min_hand_presence_confidence=min_detection_confidence,
-            min_tracking_confidence=min_detection_confidence,
+            min_hand_detection_confidence=0.1,
+            min_hand_presence_confidence=0.1,
+            min_tracking_confidence=0.1,
         )
         self._landmarker = mp_vision.HandLandmarker.create_from_options(options)
 
